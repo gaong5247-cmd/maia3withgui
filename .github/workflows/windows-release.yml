@@ -1,0 +1,67 @@
+name: Windows Build & Release
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: maia-studio-windows-release
+  cancel-in-progress: false
+
+jobs:
+  windows-release:
+    runs-on: windows-latest
+    timeout-minutes: 90
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Install web dependencies
+        run: npm install --no-audit --no-fund
+
+      - name: Download permitted Lichess piece sets
+        run: npm run assets
+
+      - name: Create Windows app icon
+        run: npx tauri icon assets/app-icon.svg
+
+      - name: Typecheck and bundle React
+        run: npm run build
+
+      - name: Test Rust UCI parser
+        run: cargo test --manifest-path src-tauri/Cargo.toml
+
+      - name: Build Windows installer and publish Release
+        uses: tauri-apps/tauri-action@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tagName: "v__VERSION__"
+          releaseName: "Maia Studio v__VERSION__"
+          releaseBody: |
+            Maia Studio for Windows (Tauri + official Maia3-79M UCI).
+            Install the Windows EXE, then open Engine Controls → Python & checkpoint configuration → Install Maia3-79M environment.
+            Requires locally installed Python 3.10+, first-run internet access, and sufficient disk space for PyTorch and the ~316MB Maia checkpoint.
+            Includes permitted Lichess Chessnut and RhosGFX SVG pieces.
+            Human move/WDL analysis, live Elo/Temperature, PGN/FEN and persistent session.
+          releaseDraft: false
+          prerelease: true
+          uploadPlainBinary: true
