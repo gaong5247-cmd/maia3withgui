@@ -59,6 +59,8 @@ jobs:
           releaseBody: |
             Maia Studio for Windows (Tauri + official Maia3-79M UCI).
             Install the Windows EXE, then open Engine Controls → Python & checkpoint configuration → Install Maia3-79M environment.
+            v0.2.0 stores Maia/PyTorch in a dedicated LocalAppData runtime outside the NSIS app-data deletion path; it retains session history and model cache between app upgrades.
+            Users with stuck v0.1.0 uninstallers can run the plain EXE directly without uninstalling the old package first.
             Requires locally installed Python 3.10+, first-run internet access, and sufficient disk space for PyTorch and the ~316MB Maia checkpoint.
             Includes permitted Lichess Chessnut and RhosGFX SVG pieces.
             Human move/WDL analysis, live Elo/Temperature, PGN/FEN and persistent session.

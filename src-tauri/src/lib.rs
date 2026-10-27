@@ -87,6 +87,7 @@ struct UciEngine {
 pub struct AppState {
     engine: Mutex<Option<UciEngine>>,
     installation: Mutex<()>,
+    session_save: std::sync::Mutex<()>,
 }
 
 fn data_dir(app: &AppHandle) -> Result<PathBuf, String> {
@@ -481,10 +482,14 @@ fn backend_status(app: AppHandle) -> Result<bool, String> {
 #[tauri::command]
 fn load_session(app: AppHandle) -> Result<Option<Value>, String> {
     let current = runtime_root(&app)?.join("session.json");
-    let old = data_dir(&app)?.join("session.json");
-    // The new path is outside the bundle identifier so uninstalling the EXE
-    // does not silently destroy the game. Import old v0.1.0 sessions on demand.
-    let path = if current.is_file() { current } else { old };
+    // Do not touch or create the old Roaming directory unless migration is
+    // genuinely needed; it may be read-only after a failed v0.1.0 uninstall.
+    let path = if current.is_file() {
+        current
+    } else {
+        app.path().app_data_dir().map_err(|e| e.to_string())?
+            .join("session.json")
+    };
     if !path.exists() { return Ok(None); }
     let content = std::fs::read_to_string(path).map_err(|e| e.to_string())?;
     serde_json::from_str::<Value>(&content)
@@ -492,7 +497,9 @@ fn load_session(app: AppHandle) -> Result<Option<Value>, String> {
 }
 
 #[tauri::command]
-fn save_session(app: AppHandle, session: Value) -> Result<(), String> {
+fn save_session(app: AppHandle, state: State<'_, AppState>, session: Value) -> Result<(), String> {
+    let _save_guard = state.session_save.lock()
+        .map_err(|e| format!("세션 저장 잠금 오류: {e}"))?;
     let data = serde_json::to_vec(&session).map_err(|e| e.to_string())?;
     if data.len() > 2_000_000 {
         return Err("세션이 너무 큽니다.".into());

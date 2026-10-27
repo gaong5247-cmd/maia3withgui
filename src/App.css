@@ -324,3 +324,14 @@ input[type=range] { width:100%; accent-color:#d1ae7a; cursor:pointer; height:7px
   .board-container { padding:0 8px; }
   .player-strip { padding:0 9px; }
 }
+
+.runtime-location { margin-top: 13px; padding: 12px; background: #101a29; border: 1px solid rgba(127,183,164,.21); border-radius: 8px; display:flex; flex-direction:column; gap:9px; }
+.runtime-location strong { color:#97baa9; font-size:9px; font-weight:760; letter-spacing:.08em; }
+.runtime-location code { display:block; overflow-wrap:anywhere; font-size:9px; line-height:1.5; color:#aabacc; }
+.runtime-location span { font-size:10px; color:#a7c7af; }
+.legacy-warning { margin-top:13px; padding:12px; border:1px solid rgba(217,175,112,.35); border-radius:8px; background:#322b29; }
+.legacy-warning strong { display:block; color:#f4d1a1; font-size:11px; margin-bottom:4px; }
+.legacy-warning p { margin:7px 0 11px; color:#cebba6; }
+.legacy-warning code { display:block; margin-top:10px; font-size:9px; overflow-wrap:anywhere; line-height:1.5; color:#b9a99d; }
+.legacy-cleanup { background:#624b37; color:#f5e1bf; width:100%; display:flex; align-items:center; justify-content:center; gap:7px; font-size:10px; font-weight:700; border-radius:6px; padding:9px 6px; }
+.legacy-cleanup:not(:disabled):hover { background:#7f6044; }

@@ -15,12 +15,22 @@
 1. Download and run the Windows installer from Releases.
 2. Open **Engine Controls → Python & checkpoint configuration**.
 3. If Python is not on PATH, specify its executable in **Python executable** (such as `C:\\Python311\\python.exe`).
-4. Click **Install Maia3-79M environment**. Maia Studio creates its own virtual environment inside the application data folder, installs [CSSLab/maia3](https://github.com/CSSLab/maia3) and its dependencies, and caches the official 79M weights via Hugging Face.
+4. Click **Install Maia3-79M environment**. Maia Studio creates an **independent per-user LocalAppData runtime**, installs [CSSLab/maia3](https://github.com/CSSLab/maia3) and its dependencies, then caches the official 79M weights via Hugging Face.
 5. Click **Analyze position** (or leave Auto enabled). The first engine launch initializes the model; subsequent analyses reuse the same process.
+
+**v0.2.0 fixed storage:** the Maia3/PyTorch environment is now created at `%LOCALAPPDATA%\\MaiaStudioRuntime\\maia3-79m-v1`, not inside Tauri's app data directory. The 79M model is stored in `%LOCALAPPDATA%\\MaiaStudioRuntime\\huggingface` unless an existing checkpoint path is supplied. The app and its Python runtime have independent lifecycles. A verified marker is written only when environment installation, checkpoint work and imports have succeeded. Interrupted setups can be retried without blindly deleting existing Python files. Your session JSON is persisted under `%LOCALAPPDATA%\\MaiaStudioRuntime\\session.json`.
+
+### Upgrading from v0.1.0
+
+- **Do not force-delete the old app data folder while the old Maia process is running.** The v0.1.0 uninstaller has its own removal behavior that cannot be retroactively patched.
+- The **standalone EXE** from [v0.2.0](https://github.com/gaong5247-cmd/maia3withgui/releases/tag/v0.2.0) can run without first uninstalling the old installer. This is the easiest way around an old uninstaller blocked by file permissions.
+- After launching v0.2.0, install the new independent Maia environment. Once the new setup is verified, **Engine Controls** offers a clearly labeled opt-in button to remove **only** `%APPDATA%\\com.gaong.maia.studio\\maia-python`. It never touches global Python, session data, or the new runtime. If Windows still denies deletion, close Python and use the documented manual steps in [INSTALLATION.md](INSTALLATION.md).
+- In the old NSIS uninstaller, **do not select “Delete the application data”** if you need the legacy session or if deleting the giant Roaming Python folder gets stuck. The new EXE preserves and imports accessible `session.json` files from v0.1.0. Existing WebView localStorage also remains available if it was not deleted.
+- Installing/uninstalling just the EXE does not automatically delete the new independent runtime; it is deliberately kept for reinstall. See [INSTALLATION.md](INSTALLATION.md) for opt-in cleanup instructions.
 
 If you have a trusted **local** 79M checkpoint, enter its path in the checkpoint field. The app still uses the **79M architecture preset**.
 
-**Environment note:** The app uses the installed venv when present, otherwise the configured system Python. Installation relies on the official GitHub source ZIP and the Python packaging index. For machines without Python, install Python 3.10+ first.
+**Environment note:** The configured system Python is used solely to bootstrap the managed runtime. Analysis requires a completed managed installation; an unverified or half-installed environment will not be executed. Installation relies on the official GitHub source ZIP and the Python packaging index. For machines without Python, install Python 3.10+ first.
 
 ## Features
 
@@ -29,7 +39,7 @@ If you have a trusted **local** 79M checkpoint, enter its path in the checkpoint
 - Elo/Temperature changes are applied through UCI `setoption` and automatically reanalyzed **without model restart**.
 - Beautiful interactive chessboard: click / drag to play, promotion choice, move arrows, white/black rotation, and full legal move validation using chess.js.
 - Navigable move history, keyboard navigation (←, →, Home, End), branch from an earlier move, PGN import/export and FEN import/copy.
-- **Session persistence:** every move, cursor position, analysis settings and visual preferences are saved synchronously to the local WebView store with a second app-data JSON copy; closing and reopening the EXE restores the session.
+- **Session persistence:** every move, cursor position, analysis settings and visual preferences are saved synchronously to the WebView store and a separate persistent LocalAppData JSON copy outside NSIS-deleted bundle folders; closing and reopening the EXE restores the session. A v0.1.0 Roaming backup can be imported.
 - Two licensed Lichess piece skins: Chessnut (Apache-2.0) and RhosGFX (CC0). Official Chess.com artwork is *not* bundled without verified redistribution permission.
 
 ## Development
@@ -61,6 +71,6 @@ The **candidate ranking** comes from the human-move policy head at the configure
 
 ## Security and licensing
 
-The Tauri/Rust process starts Python directly with explicit arguments (no shell command interpolation), validates FEN and UCI move text, and stores user sessions in the platform's application-data directory. Model downloads and Python installs are initiated by the user.
+The Tauri/Rust process starts Python directly with explicit arguments (no shell command interpolation), validates FEN and UCI move text, and stores user sessions in an **independent** per-user LocalAppData runtime directory. Model downloads and Python installs are initiated by the user.
 
 The GUI source is MIT licensed. The separate Maia3 code and model are AGPL-3.0 licensed. See [THIRD_PARTY.md](THIRD_PARTY.md) for piece assets and acknowledgements. Maia Studio is an independent project, unaffiliated with CSSLab, Lichess or Chess.com.
