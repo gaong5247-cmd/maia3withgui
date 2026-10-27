@@ -14,6 +14,12 @@ import { isSquare, loadPgnToSession, normalizeSession, pgnAtCursor, replay, sanF
 
 type ImportMode = 'pgn' | 'fen'
 type PromotionChoice = { from: Square; to: Square }
+type BackendDetails = {
+  ready: boolean
+  runtimePath: string
+  legacyExists: boolean
+  legacyPath: string
+}
 const PIECE_NAMES: Record<string, string> = { k: 'King', q: 'Queen', r: 'Rook', b: 'Bishop', n: 'Knight', p: 'Pawn' }
 const PIECE_FALLBACK: Record<string, string> = {
   wK: '♔', wQ: '♕', wR: '♖', wB: '♗', wN: '♘', wP: '♙',
@@ -44,6 +50,8 @@ export default function App() {
   const [busy, setBusy] = useState(false)
   const [installed, setInstalled] = useState(false)
   const [installing, setInstalling] = useState(false)
+  const [cleaning, setCleaning] = useState(false)
+  const [backendDetails, setBackendDetails] = useState<BackendDetails | null>(null)
   const [engineStatus, setEngineStatus] = useState('MODEL NOT LOADED')
   const [error, setError] = useState('')
   const [toast, setToast] = useState('')
@@ -81,11 +89,18 @@ export default function App() {
     let alive = true
     void Promise.all([
       invoke<Session | null>('load_session').catch(() => null),
-      invoke<boolean>('backend_status').catch(() => false)
-    ]).then(([disk, envReady]) => {
+      invoke<BackendDetails>('backend_details').catch(() => null)
+    ]).then(([disk, details]) => {
       if (!alive) return
       if (!localStorage.getItem(STORAGE_KEY) && disk) setSession(normalizeSession(disk))
-      setInstalled(envReady)
+      setInstalled(Boolean(details?.ready))
+      setBackendDetails(details)
+      if (!details?.ready) {
+        setSetupOpen(true)
+        setEngineStatus('INSTALL REQUIRED')
+      } else {
+        setEngineStatus('READY TO ANALYZE')
+      }
       setHydrated(true)
     })
     const unsubs: Array<() => void> = []
@@ -138,13 +153,13 @@ export default function App() {
     reqRef.current += 1
     setAnalysis(null)
     setBusy(false)
-    if (!hydrated || !session.autoAnalyze || installing || gameOver) return
+    if (!hydrated || !installed || !session.autoAnalyze || installing || gameOver) return
     const timer = window.setTimeout(() => { void performAnalysis() }, 360)
     return () => {
       window.clearTimeout(timer)
       reqRef.current += 1
     }
-  }, [hydrated, session.autoAnalyze, performAnalysis, installing, gameOver])
+  }, [hydrated, installed, session.autoAnalyze, performAnalysis, installing, gameOver])
 
   function applyUci(uci: string) {
     const clone = new Chess(board.fen())
@@ -270,23 +285,53 @@ export default function App() {
     setToast('PGN을 내보냈습니다')
   }
 
+  async function refreshBackend() {
+    const details = await invoke<BackendDetails>('backend_details')
+    setBackendDetails(details)
+    setInstalled(details.ready)
+    return details
+  }
+
   async function installMaia() {
-    if (installing) return
+    if (installing || cleaning) return
     setInstalling(true)
     setError('')
     setSetupOpen(true)
     setEngineStatus('SETTING UP MAIA')
     try {
-      await invoke<string>('install_backend', { pythonPath: session.settings.pythonPath })
-      setInstalled(true)
+      await invoke<string>('install_backend', {
+        pythonPath: session.settings.pythonPath,
+        checkpointPath: session.settings.checkpointPath
+      })
+      await refreshBackend()
       setEngineStatus('MODEL INSTALLED')
-      setToast('Maia3-79M 환경 설치 완료')
+      setToast('Maia3-79M 환경 검사 및 설치 완료')
       void performAnalysis()
     } catch (e) {
       setError(displayError(e))
       setEngineStatus('INSTALL FAILED')
+      await refreshBackend().catch(() => {})
     } finally {
       setInstalling(false)
+    }
+  }
+
+  async function cleanupLegacy() {
+    if (cleaning || installing) return
+    const consent = window.confirm(
+      'v0.1.0에서 사용했던 Roaming\\com.gaong.maia.studio\\maia-python 폴더만 삭제합니다. 현재 실행 중인 이전 Maia/Python을 모두 종료했나요? 수순과 새 모델 환경은 삭제하지 않습니다.'
+    )
+    if (!consent) return
+    setCleaning(true)
+    setError('')
+    try {
+      await invoke<boolean>('cleanup_legacy_backend')
+      await refreshBackend()
+      setToast('v0.1.0의 이전 Python 폴더를 정리했습니다')
+    } catch (e) {
+      setError('이전 설치 폴더를 정리하지 못했습니다: ' + displayError(e))
+    } finally {
+      setCleaning(false)
     }
   }
 
@@ -423,7 +468,7 @@ export default function App() {
             <div className="analysis-heading"><span>HUMAN MOVE CANDIDATES</span><span>W / D / L</span></div>
             <div className="candidate-list">
               {busy && !analysis && <div className="analysis-empty"><LoaderCircle className="spin" size={26} /><strong>Analyzing position</strong><span>Human move predictions incoming…</span></div>}
-              {!busy && !analysis && <div className="analysis-empty"><Sparkles size={27} /><strong>Explore this position</strong><span>{error ? 'Engine setup may be needed.' : 'Maia predictions appear here.'}</span><button onClick={() => void performAnalysis()}><Play size={13} /> Analyze now</button></div>}
+              {!busy && !analysis && <div className="analysis-empty"><Sparkles size={27} /><strong>Explore this position</strong><span>{!installed ? 'Install Maia3-79M from Engine Controls first.' : error ? 'Engine setup may be needed.' : 'Maia predictions appear here.'}</span><button disabled={!installed} onClick={() => void performAnalysis()}><Play size={13} /> Analyze now</button></div>}
               {analysis && analysis.candidates.length === 0 && <div className="analysis-empty"><Target size={26} /><strong>End of position</strong><span>No legal move candidates.</span></div>}
               {analysis?.candidates.map((candidate, index) => {
                 const [w, d, l] = humanWdl(candidate)
@@ -438,7 +483,7 @@ export default function App() {
             </div>
             {analysis?.bestmove && <div className="sampled-move"><span>SAMPLED MOVE</span><strong>{sanForUci(board, analysis.bestmove)}</strong><button title="Play sampled move" onClick={() => applyUci(analysis.bestmove!)}><ArrowDownToLine size={15} /></button></div>}
             <div className="analysis-buttons">
-              <button className="primary-button" disabled={busy || installing || gameOver} onClick={() => void performAnalysis()}>{busy ? <LoaderCircle size={16} className="spin" /> : <Activity size={16} />}{busy ? 'Analyzing…' : 'Analyze position'}</button>
+              <button className="primary-button" disabled={!installed || busy || installing || gameOver} onClick={() => void performAnalysis()}>{busy ? <LoaderCircle size={16} className="spin" /> : <Activity size={16} />}{busy ? 'Analyzing…' : 'Analyze position'}</button>
               <button className={'toggle-button ' + (session.autoAnalyze ? 'toggle-active' : '')} title="Auto analyze" onClick={() => setValue(s => ({ ...s, autoAnalyze: !s.autoAnalyze }))}><span className="toggle-track"><i /></span><small>AUTO</small></button>
             </div>
             <p className="analysis-disclaimer"><CircleHelp size={13} /> WDL estimates human game outcomes, not search evaluations. Elo conditions predictions, not engine strength.</p>
@@ -475,8 +520,15 @@ export default function App() {
                 <input value={session.settings.pythonPath} placeholder="python or C:\\Python311\\python.exe" onChange={e => setSetting('pythonPath', e.target.value)} />
                 <label>Local Maia3-79M checkpoint (optional)</label>
                 <input value={session.settings.checkpointPath} placeholder="C:\\models\\maia3-79m.pt" onChange={e => setSetting('checkpointPath', e.target.value)} />
-                <button className="setup-button" onClick={() => void installMaia()} disabled={installing}>{installing ? <LoaderCircle size={15} className="spin" /> : <Download size={15} />}{installing ? 'Installing / downloading…' : installed ? 'Reinstall / verify Maia3-79M' : 'Install Maia3-79M environment'}</button>
-                <p>Requires Python 3.10+ to create an isolated environment. Downloads official Maia3, PyTorch and the 316MB checkpoint on first setup.</p>
+                <button className="setup-button" onClick={() => void installMaia()} disabled={installing || cleaning}>{installing ? <LoaderCircle size={15} className="spin" /> : <Download size={15} />}{installing ? 'Installing / verifying…' : installed ? 'Verify / repair Maia3-79M' : 'Install Maia3-79M environment'}</button>
+                <p>Needs Python 3.10+ for the first setup. Maia3 and PyTorch are installed separately from the app. Reinstalling the EXE preserves the runtime and downloaded checkpoint.</p>
+                {backendDetails && <div className="runtime-location"><strong>INDEPENDENT RUNTIME LOCATION</strong><code title={backendDetails.runtimePath}>{backendDetails.runtimePath}</code><span>{backendDetails.ready ? '● Verified environment' : '○ Not installed or incomplete'}</span></div>}
+                {backendDetails?.legacyExists && <div className="legacy-warning">
+                  <strong>Old v0.1.0 Python environment detected</strong>
+                  <p>The old runtime was stored inside Roaming app data. This could prevent uninstall. New Maia installs use an independent directory. Finish setting up the new runtime before cleaning the old one.</p>
+                  <button className="legacy-cleanup" disabled={!installed || cleaning || installing} onClick={() => void cleanupLegacy()}>{cleaning ? <LoaderCircle className="spin" size={14} /> : <RotateCcw size={14} />} {cleaning ? 'Removing old files…' : 'Clean old v0.1.0 Python files'}</button>
+                  <code title={backendDetails.legacyPath}>{backendDetails.legacyPath}</code>
+                </div>}
               </div>}
             </div>}
           </section>
